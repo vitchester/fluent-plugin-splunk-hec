@@ -93,6 +93,15 @@ module Fluent::Plugin
     desc 'When set to true, all fields defined in `index_key`, `host_key`, `source_key`, `sourcetype_key`, `metric_name_key`, `metric_value_key` will not be removed from the original event.'
     config_param :keep_keys, :bool, default: false
 
+    desc 'If a connection has not been used for this number of seconds it will automatically be reset upon the next use to avoid attempting to send to a closed connection. nil means no timeout.'
+    config_param :idle_timeout, :integer, default: 5
+
+    desc 'The amount of time allowed between reading two chunks from the socket.nil means no timeout.'
+    config_param :read_timeout, :integer, default: nil
+
+    desc 'The amount of time to wait for a connection to be opened.nil means no timeout.'
+    config_param :open_timeout, :integer, default: nil
+
     desc 'Define index-time fields for event data type, or metric dimensions for metric data type. Null value fields will be removed.'
     config_section :fields, init: false, multi: false, required: false do
       # this is blank on purpose
@@ -122,11 +131,12 @@ module Fluent::Plugin
       super
       @default_host = Socket.gethostname
       @extra_fields = nil
+
     end
 
     def configure(conf)
       super
-
+      log.debug conf
       check_conflict
       check_metric_configs
       construct_api
@@ -142,7 +152,6 @@ module Fluent::Plugin
 
     def start
       super
-
       @hec_conn = new_connection
     end
 
@@ -163,9 +172,9 @@ module Fluent::Plugin
 
     def check_conflict
       KEY_FIELDS.each { |f|
-	kf = "#{f}_key"
-	raise Fluent::ConfigError, "Can not set #{f} and #{kf} at the same time." \
-	  if %W[@#{f} @#{kf}].all? &method(:instance_variable_get)
+        kf = "#{f}_key"
+        raise Fluent::ConfigError, "Can not set #{f} and #{kf} at the same time." \
+        if %W[@#{f} @#{kf}].all? &method(:instance_variable_get)
       }
     end
 
@@ -315,6 +324,10 @@ module Fluent::Plugin
         c.ca_file = @ca_file
         c.ca_path = @ca_path
         c.ciphers = @ssl_ciphers
+
+        c.idle_timeout = @idle_timeout
+        c.read_timeout = @read_timeout
+        c.open_timeout = @open_timeout
 
         c.override_headers['Content-Type'] = 'application/json'
         c.override_headers['User-Agent'] = "fluent-plugin-splunk_hec_out/#{VERSION}"

@@ -211,7 +211,7 @@ Field name to contain metric value, this is required when `metric_name_key` is s
 
 By default, all the fields used by the `*_key` parameters will be removed from the original input events. To change this behavior, set this parameter to `true`.
 
-Default value: `true`.
+Default value: `false`.
 
 ### coerce_to_utf8 (bool) (optional)
 
@@ -364,6 +364,31 @@ List of SSl ciphers allowed.
 Indicates if insecure SSL connection is allowed, i.e. do not verify the server's certificate.
 
 Default value: `false`.
+
+###Net::HTTP::Persistent parameters (optional)
+The following parameters can be used for tuning HTTP connections
+
+####idle_timeout (integer)
+If a connection has not been used for this number of seconds it will automatically be reset upon the next use to avoid attempting to send to a closed connection. 
+
+Default value: `5`.
+
+nil means no timeout.
+
+
+####read_timeout (integer)
+The amount of time allowed between reading two chunks from the socket.
+
+Default value: `nil`.
+
+nil means no timeout.
+####open_timeout (integer)
+The amount of time to wait for a connection to be opened.
+
+Default value: `nil`.
+
+nil means no timeout.
+
 
 ## About Buffer
 

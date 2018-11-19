@@ -5,13 +5,14 @@ describe Fluent::Plugin::SplunkHecOutput do
   include PluginTestHelper
 
   before { Fluent::Test.setup } # setup router and others
-    
+
+  ###Test to check version number wont be nil
   it { expect(::Fluent::Plugin::SplunkHecOutput::VERSION).wont_be_nil }
 
   describe "hec_host validation" do
     describe "invalid host" do
       it "should require hec_host" do
-	expect{ create_output_driver }.must_raise Fluent::ConfigError
+	      expect{ create_output_driver }.must_raise Fluent::ConfigError
       end
 
       it { expect{ create_output_driver('hec_host %bad-host%') }.must_raise Fluent::ConfigError }
@@ -22,6 +23,30 @@ describe Fluent::Plugin::SplunkHecOutput do
 	expect(create_output_driver('hec_host splunk.com').instance.hec_host).must_equal "splunk.com"
       }
     end
+  end
+
+  it "should test and validate the setup of all default values" do
+    # format for multi-entry (s = create_output_driver('hec_host localhost:8888','protocol http','hec_host localhost'))
+
+    s = create_output_driver('hec_host localhost')
+    expect(s.instance.hec_port).must_equal(8088)
+    expect(s.instance.metrics_from_event).must_equal(true)
+    expect(s.instance.keep_keys).must_equal(false)
+    expect(s.instance.coerce_to_utf8).must_equal(true)
+    expect(s.instance.non_utf8_replacement_string).must_equal(' ')
+    expect(s.instance.insecure_ssl).must_equal(false)
+
+    #HTTP Persistent params
+    expect(s.instance.idle_timeout).must_equal(5)
+    assert_nil(s.instance.read_timeout)
+    assert_nil(s.instance.open_timeout)
+  end
+
+  it "should test and validate the setup of all HTTP Persistent values" do
+    s = create_output_driver('hec_host localhost','idle_timeout 10', 'read_timeout 10', 'open_timeout 10'  )
+    expect(s.instance.idle_timeout).must_equal(10)
+    expect(s.instance.read_timeout).must_equal(10)
+    expect(s.instance.open_timeout).must_equal(10)
   end
 
   it "should send request to Splunk" do
@@ -60,10 +85,10 @@ describe Fluent::Plugin::SplunkHecOutput do
 
   it "should support ${tag}" do
     verify_sent_events(<<~CONF) { |batch|
-    index ${tag}
-    host ${tag}
-    source ${tag}
-    sourcetype ${tag}
+      index ${tag}
+      host ${tag}
+      source ${tag}
+      sourcetype ${tag}
     CONF
       batch.each do |item|
 	%w[index host source sourcetype].each { |field|
@@ -141,11 +166,11 @@ describe Fluent::Plugin::SplunkHecOutput do
 
   it "should support fields for indexed field extraction" do
     verify_sent_events(<<~CONF) { |batch|
-    <fields>
-      from
-      logLevel level
-      nonexist
-    </fields>
+      <fields>
+        from
+        logLevel level
+        nonexist
+      </fields>
     CONF
       batch.each do |item|
 	JSON.load(item['event']).tap { |event|
@@ -266,8 +291,8 @@ describe Fluent::Plugin::SplunkHecOutput do
       "file"  => "cool.log",
       "value" => 100,
       "agent" => {
-	"name"    => "test",
-	"version" => "1.0.0"
+        "name"    => "test",
+        "version" => "1.0.0"
       }
     }
     events = [
