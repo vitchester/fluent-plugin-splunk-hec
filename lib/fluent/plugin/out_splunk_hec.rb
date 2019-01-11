@@ -24,17 +24,27 @@ module Fluent::Plugin
       MISSING_FIELD
     }.freeze
 
-    desc 'Protocol to use to call HEC API.'
+    desc 'Protocol used to call HEC API.'
     config_param :protocol, :enum, list: %i[http https], default: :https
 
-    desc 'The hostname/IP to HEC, or HEC load balancer.'
+    desc 'The Splunk destination hostname/IP/load balancer to send events via HEC'
     config_param :hec_host, :string
 
-    desc 'The port number to HEC, or HEC load balancer.'
+    desc 'The Splunk HEC port number.'
     config_param :hec_port, :integer, default: 8088
 
-    desc 'The HEC token.'
+    desc 'The Splunk HEC token.'
     config_param :hec_token, :string
+
+    desc 'Type of data sending to Splunk, `event` or `metric`. `metric` type is supported since Splunk 7.0.
+                    To use `metric` type, make sure the index is a metric index.'
+    config_param :data_type, :enum, list: %i[event metric], default: :event
+
+    desc 'The Splunk HEC endpoint type to use(Event or Raw). Only valid when data_type is set to event'
+    config_param :hec_endpoint_type, :enum, list: %i[event raw], default: :event
+
+    desc 'Only applicable to /raw HEC endpoint. The setting is used to specify a custom line breaker to help Splunk separate the events correctly'
+    config_param :hec_raw_linebreaker, :string, default: "|||||"
 
     desc 'The path to a file containing a PEM-format CA certificate for this client.'
     config_param :client_cert, :string, default: nil
@@ -51,19 +61,16 @@ module Fluent::Plugin
     desc 'List of SSL ciphers allowed.'
     config_param :ssl_ciphers, :array, default: nil
 
-    desc 'Indicates if insecure SSL connection is allowed.'
+    desc 'Indicates if insecure SSL connection(s) are allowed.'
     config_param :insecure_ssl, :bool, default: false
 
-    desc 'Type of data sending to Splunk, `event` or `metric`. `metric` type is supported since Splunk 7.0. To use `metric` type, make sure the index is a metric index.'
-    config_param :data_type, :enum, list: %i[event metric], default: :event
-
-    desc 'The Splunk index to index events. When not set, will be decided by HEC. This is exclusive with `index_key`'
+    desc 'The Splunk destination index to index events. When not set, will be decided by HEC. This is exclusive with `index_key`'
     config_param :index, :string, default: nil
 
     desc 'Field name to contain Splunk index name. This is exclusive with `index`.'
     config_param :index_key, :string, default: nil
 
-    desc "The host field for events, by default it uses the hostname of the machine that runnning fluentd. This is exclusive with `host_key`."
+    desc "The host field for events, by default it uses the hostname of the machine that running fluentd. This is exclusive with `host_key`."
     config_param :host, :string, default: nil
 
     desc 'Field name to contain host. This is exclusive with `host`.'
@@ -136,13 +143,12 @@ module Fluent::Plugin
 
       # @formatter_configs is from formatter helper
       @formatters = @formatter_configs.map { |section|
-	MatchFormatter.new section.usage, formatter_create(usage: section.usage)
+        MatchFormatter.new section.usage, formatter_create(usage: section.usage)
       }
     end
 
     def start
       super
-
       @hec_conn = new_connection
     end
 
@@ -225,10 +231,32 @@ module Fluent::Plugin
 
     def pick_custom_format_method
       if @data_type == :event
-	define_singleton_method :format, method(:format_event)
+        if @hec_endpoint_type == :event
+          define_singleton_method :format, method(:format_event)
+        else
+          define_singleton_method :format, method(:format_raw)
+        end
       else
-	define_singleton_method :format, method(:format_metric)
+        define_singleton_method :format, method(:format_metric)
       end
+    end
+
+    def format_raw(tag, time, record)
+      raw_event = RawEvent.new()
+
+      host = @host ? @host.(tag, record) : @default_host
+      raw_event.instance_variable_set(:@raw_time, time.to_f.to_s )
+      raw_event.instance_variable_set(:@raw_host, host )
+      raw_event.instance_variable_set(:@raw_source, @source.(tag, record) ) if @source
+      raw_event.instance_variable_set(:@raw_sourcetype, @sourcetype.(tag, record) ) if @sourcetype
+      raw_event.instance_variable_set(:@raw_index, index.(tag, record) ) if @index
+
+      if formatter = @formatters.find { |f| f.match? tag }
+        record = formatter.format(tag, time, record)
+      end
+
+      converted_record = convert_to_utf8 record
+      raw_event.instance_variable_set(:@raw_event, converted_record + @hec_raw_linebreaker)
     end
 
     def format_event(tag, time, record)
@@ -244,7 +272,7 @@ module Fluent::Plugin
 	payload[:source] = @source.(tag, record) if @source
 	payload[:sourcetype] = @sourcetype.(tag, record) if @sourcetype
 
-	# delete nil fields otherwise will get formet error from HEC
+  # delete nil fields to avoid format error from HEC
 	%i[host index source sourcetype].each { |f| payload.delete f if payload[f].nil? }
 
 	if @extra_fields
@@ -303,6 +331,9 @@ module Fluent::Plugin
 
     def construct_api
       @hec_api = URI("#{@protocol}://#{@hec_host}:#{@hec_port}/services/collector")
+      if @hec_endpoint_type == :raw
+        @hec_api = URI("#{@protocol}://#{@hec_host}:#{@hec_port}/services/collector/raw")
+      end
     rescue
       raise Fluent::ConfigError, "hec_host (#{@hec_host}) and/or hec_port (#{@hec_port}) are invalid."
     end
@@ -377,6 +408,17 @@ module Fluent::Plugin
 	  raise
 	end
       end
+    end
+  end
+
+  class RawEvent
+    def initialize()
+      @raw_time
+      @raw_source
+      @raw_sourcetype
+      @raw_host
+      @raw_index
+      @raw_event
     end
   end
 end
